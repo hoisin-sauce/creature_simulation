@@ -51,7 +51,8 @@ class Worker:
                  is_bound_by_screen=True,
                  body_type="oval",
                  groups_to_join=None,
-                 default_value=None):
+                 default_energy=None,
+                 vision_range=5):
 
         if start_direction is None:
             start_direction = Vector2()
@@ -77,8 +78,8 @@ class Worker:
         if isinstance(groups_to_join, str):
             groups_to_join = {groups_to_join}
 
-        if default_value is None:
-            default_value = size.magnitude
+        if default_energy is None:
+            default_energy = size.magnitude
 
         if "workers" not in groups_to_join:
             groups_to_join.add("workers")
@@ -95,8 +96,10 @@ class Worker:
         self._body_type = body_type
         self.create_body()
         self.groups = set()
-        self._value = default_value
+        self._energy = default_energy
         self.is_dead = False
+        self._reproduction_energy = 0
+        self.vision_range = vision_range
 
         Worker.add_to_groups(self, groups_to_join)
 
@@ -105,14 +108,30 @@ class Worker:
         return self._initial_size
 
     @property
-    def value(self):
-        return self._value
+    def energy(self):
+        return self._energy
 
-    @value.setter
-    def value(self, value):
-        v = self.value
-        self._value = value
-        self.value_updated(v, value)
+    @energy.setter
+    def energy(self, value):
+        v = self.energy
+        self._energy = value
+        if self._energy > MAX_ENERGY:
+            self.reproduction_energy += value - MAX_ENERGY
+            self._energy = MAX_ENERGY
+        elif self._energy < 1:
+            self.kill()
+        self.energy_updated(v, value)
+
+    @property
+    def reproduction_energy(self):
+        return self._reproduction_energy
+
+    @reproduction_energy.setter
+    def reproduction_energy(self, value):
+        self._reproduction_energy = value
+        if self._reproduction_energy > REPRODUCTION_ENERGY:
+            self._reproduction_energy -= REPRODUCTION_ENERGY
+            self.clone()
 
     @property
     def size(self):
@@ -139,6 +158,20 @@ class Worker:
     def body_type(self):
         return self._body_type
 
+    @property
+    def positional_distance(self):
+        return self.position - self.previous_pos
+
+    @property
+    def mass(self):
+        return self.size.magnitude ** 3 * MASS_CONSTANT
+
+    def clone(self):
+        Worker(self.canvas, self.position.x, self.position.y,
+               size=self.size, color=self.color, start_direction=self.direction * -1,
+               is_bound_by_screen=self.is_bound_by_screen, body_type=self.body_type,
+               groups_to_join=self.groups, default_energy=0)
+
     # noinspection PyAttributeOutsideInit
     def create_body(self):
         match self.body_type:
@@ -156,9 +189,14 @@ class Worker:
     def update_position(self):
         if self.position != self.previous_pos:
             delta_pos = self.position - self.previous_pos
-            if not (delta_pos.x < 1 and delta_pos.y < 1):
+            if not delta_pos.magnitude < 1:
                 self.canvas.moveto(self.body, self.position.x, self.position.y)
+            else:
+                self.no_movement()
             self.previous_pos = self.position
+
+    def no_movement(self):
+        pass
 
     def detect_collisions(self):
         collision_bodies = self.get_collision_bodies()
@@ -181,6 +219,10 @@ class Worker:
     def update(self):
         pass
 
+    def absorb(self, other):
+        other.kill()
+        self.energy += other.energy
+
     def move(self, overall_movement: Vector2):
         if self.is_bound_by_screen:
             if self.motion_outside_bounds(overall_movement):
@@ -200,6 +242,7 @@ class Worker:
 
     def game_update(self):
         self.update()
+        self.get_direction()
         self.movement_update()
         self.detect_collisions()
         self.update_position()
@@ -214,7 +257,10 @@ class Worker:
                 Worker.groups[group].remove(self)
         self.canvas.delete(self.body)
 
-    def value_updated(self, before, after):
+    def energy_updated(self, before, after):
+        pass
+
+    def get_direction(self):
         pass
 
 
@@ -227,46 +273,26 @@ class Food(Worker):
         super().handle_collision(other)
         match other.groups:
             case "herbivore":
-                self.kill()
-                other.value += self.value
+                other.absorb(self)
 
 
 # noinspection PyUnresolvedReferences
-class CreatureMethods:
-    # requires movement constant
-
-    def __init__(self):
-        self.value = None
-
-    def movement_proportional_to_v(self):
-        current_movement = self.direction.normalised() * \
-                           self.speed * \
-                           min(self.value, self.movement_constant)
-        if current_movement.x < 0.01:
-            current_movement.x = 0
-        if current_movement.y < 0.01:
-            current_movement.y = 0
-        self.move(current_movement)
-
-    # requires movement energy constant
-    def movement_uses_v(self):
-        self.value -= max((self.position - self.previous_pos).magnitude * self.movement_energy, 0)
-        if self.value < 0:
-            self.value = 0
-
-    def movement_using_v_with_speed(self):
-        CreatureMethods.movement_proportional_to_v(self)
-        CreatureMethods.movement_uses_v(self)
+class CreatureMethods(Worker):
 
     # requires energy size constant
     def size_proportional_to_v(self, before, after):
-        self.size *= after / before * self.energy_size_constant
+        self.size *= after / before * ENERGY_SIZE_CONSTANT
         if after < 1:
             self.kill()
 
-    def absorb(self, other):
-        other.kill()
-        self.value += other.value
+    def movement_update(self):
+        current_movement = self.direction.normalised() * self.speed
+        self.move(current_movement)
+        energy_cost = current_movement.magnitude ** 2 * self.mass + self.vision_range
+        self.energy -= energy_cost
+
+    def standing_still_bonus(self):
+        self.energy += STANDING_STILL_CONSTANT
 
 
 class BaseCreature(Worker):
@@ -276,5 +302,4 @@ class BaseCreature(Worker):
 
 
 class TestCreature(Worker):
-    movement_update = CreatureMethods.movement_using_v_with_speed
-    value_updated = CreatureMethods.size_proportional_to_v
+    movement_update = CreatureMethods.movement_update

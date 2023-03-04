@@ -44,8 +44,9 @@ class Vector2:
         else:
             raise TypeError
 
+    # noinspection PyTypeChecker
     def __div__(self, other):
-        if isinstance(other, [int, float]):
+        if isinstance(other, (int, float)):
             return Vector2(self.x / other, self.y / other)
         elif isinstance(other, Vector2):
             return Vector2(self.x / other, self.y / other)
@@ -57,8 +58,5 @@ class Vector2:
 
 
 if __name__ == "__main__":
-    # test cases
-    n = Vector2(3, 4)
-    n.normalise()
-    n *= 2
-    print(n)
+    # testing
+    pass
