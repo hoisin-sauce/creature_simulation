@@ -25,12 +25,12 @@ class Vector2:
         return Vector2()
 
     def __mul__(self, other):
-        if isinstance(other, int):
+        if isinstance(other, (int, float)):
             return Vector2(self.x * other, self.y * other)
         elif isinstance(other, Vector2):
             return Vector2(self.x * other.x, self.y * other.y)
         else:
-            raise TypeError
+            raise TypeError(f"{other}: {type(other)}")
 
     def __add__(self, other):
         if isinstance(other, Vector2):

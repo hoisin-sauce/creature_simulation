@@ -8,26 +8,38 @@ class Worker:
     implied_groups = {"obsticles": {"collidable"}}
     groups = {"workers": set(),
               "collidable": set(),
-              "obsticles": set()}
+              "obsticles": set(),
+              "to be killed": set()}
 
     pressed_keys = set()
-
+    
+    @staticmethod
     def update_workers():
         for worker in Worker.groups["workers"]:
+            if worker.is_dead:
+                continue
             worker.game_update()
 
+    @staticmethod
+    def purge_dead_workers():
+        for worker in Worker.groups["to be killed"]:
+            worker.commit_to_kill()
+        Worker.groups["to be killed"] = set()
+
+    @staticmethod
     def add_to_groups(worker, groups):
         for group in groups:
             if group in Worker.groups.keys() and worker not in Worker.groups[group]:
                 Worker.groups[group].add(worker)
-                print(f"{group} : {Worker.groups[group]}")
                 worker.groups.add(group)
+                # print(f"{group} : {Worker.groups[group]}")
                 if group in Worker.implied_groups.keys():
                     Worker.add_to_groups(worker, Worker.implied_groups[group])
             else:
                 Worker.groups[group] = {worker}
                 worker.groups.add(group)
 
+    @staticmethod
     def imply_groups(original_group: str, implied_groups: Iterable):
         Worker.implied_groups[original_group] = implied_groups
 
@@ -72,6 +84,7 @@ class Worker:
             groups_to_join.add("workers")
 
         self._size = size
+        self._initial_size = size
         self.position = Vector2(x, y)
         self.direction = start_direction
         self.speed = speed
@@ -88,13 +101,18 @@ class Worker:
         Worker.add_to_groups(self, groups_to_join)
 
     @property
+    def initial_size(self):
+        return self._initial_size
+
+    @property
     def value(self):
         return self._value
 
     @value.setter
     def value(self, value):
+        v = self.value
         self._value = value
-        self.value_updated()
+        self.value_updated(v, value)
 
     @property
     def size(self):
@@ -137,7 +155,9 @@ class Worker:
 
     def update_position(self):
         if self.position != self.previous_pos:
-            self.canvas.moveto(self.body, self.position.x, self.position.y)
+            delta_pos = self.position - self.previous_pos
+            if not (delta_pos.x < 1 and delta_pos.y < 1):
+                self.canvas.moveto(self.body, self.position.x, self.position.y)
             self.previous_pos = self.position
 
     def detect_collisions(self):
@@ -185,12 +205,16 @@ class Worker:
         self.update_position()
 
     def kill(self):
-        for group in self.groups:
-            Worker.groups[group].remove(self)
-        self.canvas.delete(self.body)
+        Worker.add_to_groups(self, ["to be killed"])
         self.is_dead = True
 
-    def value_updated(self):
+    def commit_to_kill(self):
+        for group in self.groups:
+            if group != "to be killed":
+                Worker.groups[group].remove(self)
+        self.canvas.delete(self.body)
+
+    def value_updated(self, before, after):
         pass
 
 
@@ -207,19 +231,38 @@ class Food(Worker):
                 other.value += self.value
 
 
+# noinspection PyUnresolvedReferences
 class CreatureMethods:
     # requires movement constant
+
+    def __init__(self):
+        self.value = None
+
     def movement_proportional_to_v(self):
-        current_movement = self.direction.normalised() * self.speed * min(self.value, self.movement_constant)
+        current_movement = self.direction.normalised() * \
+                           self.speed * \
+                           min(self.value, self.movement_constant)
+        if current_movement.x < 0.01:
+            current_movement.x = 0
+        if current_movement.y < 0.01:
+            current_movement.y = 0
         self.move(current_movement)
 
     # requires movement energy constant
     def movement_uses_v(self):
-        self.value -= (self.position - self.previous_pos).magnitude * self.movement_energy
+        self.value -= max((self.position - self.previous_pos).magnitude * self.movement_energy, 0)
+        if self.value < 0:
+            self.value = 0
 
     def movement_using_v_with_speed(self):
-        CreatureMethods.movement_proportional_to_v()
-        CreatureMethods.movement_uses_v()
+        CreatureMethods.movement_proportional_to_v(self)
+        CreatureMethods.movement_uses_v(self)
+
+    # requires energy size constant
+    def size_proportional_to_v(self, before, after):
+        self.size *= after / before * self.energy_size_constant
+        if after < 1:
+            self.kill()
 
     def absorb(self, other):
         other.kill()
@@ -232,6 +275,6 @@ class BaseCreature(Worker):
         Worker.add_to_groups(self, "creature")
 
 
-
-
-
+class TestCreature(Worker):
+    movement_update = CreatureMethods.movement_using_v_with_speed
+    value_updated = CreatureMethods.size_proportional_to_v
