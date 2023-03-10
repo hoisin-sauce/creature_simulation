@@ -21,7 +21,7 @@ def split_list(input_list, chunk_size):
 
 class ActivationFunction:
     @staticmethod
-    def sigmoid(self, x):
+    def sigmoid(x):
         return 1/(1+math.e ** (x * -1))
 
 
